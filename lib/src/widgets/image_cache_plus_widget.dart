@@ -43,20 +43,26 @@ class _ImageCachePlusState extends State<ImageCachePlus>
   Object? _error;
   ImageChunkEvent? _loadingProgress;
 
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: widget.fadeDuration,
-    );
-   _animation = Tween<double>(begin: 0.7, end: 1.0)
-    .animate(CurvedAnimation(parent: _controller, curve: Curves.easeIn));
+ @override
+void initState() {
+  super.initState();
 
+  _controller = AnimationController(
+    vsync: this,
+    duration: widget.fadeDuration,
+    lowerBound: 0.7,   // 👈 NEVER go fully transparent
+    upperBound: 1.0,
+  );
 
-    // Start with loading
-    _loading = true;
-  }
+  _animation = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeIn,
+  );
+
+  // Start in loading state
+  _loading = true;
+}
+
 
   @override
   void didChangeDependencies() {
