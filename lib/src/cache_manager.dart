@@ -24,7 +24,7 @@ class CacheManager {
   // Configuration
   static const String _boxName = 'image_cache_plus_box';
   Duration defaultCacheDuration = const Duration(days: 7);
-  int maxMemoryCacheSize = 50 * 1024 * 1024; // 50MB
+  int maxMemoryCacheSize = 400 * 1024 * 1024; // 50MB
   int _currentMemoryCacheSize = 0;
   Directory? _cacheDir;
 
