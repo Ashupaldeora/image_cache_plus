@@ -50,7 +50,9 @@ class _ImageCachePlusState extends State<ImageCachePlus>
       vsync: this,
       duration: widget.fadeDuration,
     );
-    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
+   _animation = Tween<double>(begin: 0.7, end: 1.0)
+    .animate(CurvedAnimation(parent: _controller, curve: Curves.easeIn));
+
 
     // Start with loading
     _loading = true;
