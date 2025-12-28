@@ -11,6 +11,8 @@ class ImageCachePlus extends StatefulWidget {
   final WidgetBuilder? errorWidget;
   final Duration fadeDuration;
   final Alignment alignment;
+  final int? memCacheWidth;
+  final int? memCacheHeight;
   final Map<String, String>? httpHeaders;
   final bool useOldImageOnUrlChange;
 
@@ -26,6 +28,8 @@ class ImageCachePlus extends StatefulWidget {
     this.alignment = Alignment.center,
     this.httpHeaders,
     this.useOldImageOnUrlChange = false,
+    this.memCacheWidth,
+    this.memCacheHeight,
   });
 
   @override
@@ -43,26 +47,28 @@ class _ImageCachePlusState extends State<ImageCachePlus>
   Object? _error;
   ImageChunkEvent? _loadingProgress;
 
- @override
-void initState() {
-  super.initState();
+  @override
+  void initState() {
+    super.initState();
 
-  _controller = AnimationController(
-    vsync: this,
-    duration: widget.fadeDuration,
-    lowerBound: 0.7,   // 👈 NEVER go fully transparent
-    upperBound: 1.0,
-  );
+    _controller =
+        AnimationController(
+          vsync: this,
+          duration: widget.fadeDuration,
+          lowerBound: 0.0,
+          upperBound: 1.0,
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            // Trigger rebuild to possibly remove placeholder from Stack
+            setState(() {});
+          }
+        });
 
-  _animation = CurvedAnimation(
-    parent: _controller,
-    curve: Curves.easeIn,
-  );
+    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
 
-  // Start in loading state
-  _loading = true;
-}
-
+    // Start in loading state
+    _loading = true;
+  }
 
   @override
   void didChangeDependencies() {
@@ -73,16 +79,27 @@ void initState() {
   @override
   void didUpdateWidget(ImageCachePlus oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.imageUrl != oldWidget.imageUrl) {
+    if (widget.imageUrl != oldWidget.imageUrl ||
+        widget.memCacheWidth != oldWidget.memCacheWidth ||
+        widget.memCacheHeight != oldWidget.memCacheHeight) {
       _resolveImage();
     }
   }
 
   void _resolveImage() {
-    final CachedNetworkImageProvider provider = CachedNetworkImageProvider(
+    final ImageProvider baseProvider = CachedNetworkImageProvider(
       widget.imageUrl,
       headers: widget.httpHeaders,
     );
+
+    final ImageProvider provider =
+        (widget.memCacheWidth != null || widget.memCacheHeight != null)
+        ? ResizeImage(
+            baseProvider,
+            width: widget.memCacheWidth,
+            height: widget.memCacheHeight,
+          )
+        : baseProvider;
 
     final ImageStream newStream = provider.resolve(
       createLocalImageConfiguration(
@@ -114,10 +131,6 @@ void initState() {
         _loadingProgress = null;
       });
       _controller.reset();
-    } else {
-      // Kepp showing old image while loading new one
-      // But we can show a progress indicator on top if needed?
-      // For now, let's just tracking loading state but keep _imageInfo
     }
 
     newStream.addListener(_imageStreamListener!);
@@ -131,7 +144,7 @@ void initState() {
         _error = null;
       });
       if (synchronousCall) {
-        _controller.value = 1.0; // No fade if synchronous (e.g. memory cache)
+        _controller.value = 1.0;
       } else {
         _controller.forward();
       }
@@ -170,7 +183,7 @@ void initState() {
 
   @override
   Widget build(BuildContext context) {
-    // 1. Error Case
+    // 1. Error Case (Highest priority, replaces everything)
     if (_error != null) {
       if (widget.errorWidget != null) {
         return SizedBox(
@@ -188,45 +201,65 @@ void initState() {
       );
     }
 
-    // 2. Loading Case (but no image yet)
-    if (_loading && _imageInfo == null) {
+    // We use a Stack to handle the transition:
+    // Bottom: Placeholder/Loading Indicator (only if needed)
+    // Top: The Image (fading in)
+
+    final List<Widget> children = [];
+
+    // --- Bottom Layer: Placeholder ---
+    // Show placeholder if:
+    // 1. We are loading (_loading == true)
+    // 2. OR the animation is running (opacity < 1.0) -> PREVENTS BACK VIEW
+    // 3. BUT NOT if we have an "old image" from useOldImageOnUrlChange (handled by image itself being persistent)
+
+    // Simplification: We always show the placeholder behind the image UNLESS the image is fully loaded and opaque.
+    // If we have no image info yet, we definitely need the placeholder.
+    // If we have image info but opacity < 1.0, we still need placeholder behind.
+
+    final bool showPlaceholder = _loading || _controller.value != 1.0;
+
+    if (showPlaceholder) {
       if (widget.placeholder != null) {
-        return SizedBox(
-          width: widget.width,
-          height: widget.height,
-          child: widget.placeholder!(context),
+        children.add(Positioned.fill(child: widget.placeholder!(context)));
+      } else {
+        children.add(
+          Positioned.fill(
+            child: Center(
+              child: CircularProgressIndicator(
+                value:
+                    _loadingProgress != null &&
+                        _loadingProgress!.expectedTotalBytes != null
+                    ? _loadingProgress!.cumulativeBytesLoaded /
+                          _loadingProgress!.expectedTotalBytes!
+                    : null,
+              ),
+            ),
+          ),
         );
       }
-      return SizedBox(
-        width: widget.width,
-        height: widget.height,
-        child: Center(
-          child: CircularProgressIndicator(
-            value:
-                _loadingProgress != null &&
-                    _loadingProgress!.expectedTotalBytes != null
-                ? _loadingProgress!.cumulativeBytesLoaded /
-                      _loadingProgress!.expectedTotalBytes!
-                : null,
+    }
+
+    // --- Top Layer: Image ---
+    if (_imageInfo != null) {
+      children.add(
+        FadeTransition(
+          opacity: _animation,
+          child: RawImage(
+            image: _imageInfo!.image,
+            width: widget.width,
+            height: widget.height,
+            fit: widget.fit,
+            alignment: widget.alignment,
           ),
         ),
       );
     }
 
-    // 3. Image Loaded (or keeping old image while loading new one)
     return SizedBox(
       width: widget.width,
       height: widget.height,
-      child: FadeTransition(
-        opacity: _animation,
-        child: RawImage(
-          image: _imageInfo?.image,
-          width: widget.width,
-          height: widget.height,
-          fit: widget.fit,
-          alignment: widget.alignment,
-        ),
-      ),
+      child: Stack(fit: StackFit.expand, children: children),
     );
   }
 }
