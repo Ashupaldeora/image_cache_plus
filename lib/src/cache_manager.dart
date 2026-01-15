@@ -88,9 +88,19 @@ class CacheManager {
 
     final key = Utils.keyFromUrl(url);
     if (_cacheDir == null) await init();
+
     final file = File('${_cacheDir!.path}/$key');
 
-    await file.writeAsBytes(bytes);
+    try {
+      await file.writeAsBytes(bytes);
+    } on FileSystemException {
+      if (_cacheDir != null && !await _cacheDir!.exists()) {
+        await _cacheDir!.create(recursive: true);
+        await file.writeAsBytes(bytes);
+      } else {
+        rethrow;
+      }
+    }
 
     final duration = cacheDuration ?? defaultCacheDuration;
     final expiry = clock.now().add(duration).millisecondsSinceEpoch;
